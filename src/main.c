@@ -130,7 +130,7 @@ void temperature_read_timer_handler(struct k_timer *dummy){
     k_work_submit(&temperature_read_work_queue);
 }
 
-void temperature_read_handler(struct k_work *work) {
+void update_average_temperatures() {
 	struct sensor_value fridge_temp; 
 	struct sensor_value freezer_temp;
 
@@ -149,36 +149,42 @@ void temperature_read_handler(struct k_work *work) {
 	k_mutex_lock(&average_freezer_temperature_mutex, K_MSEC(100));
 	average_freezer_temperature = ((average_freezer_temperature * (average_temperature_period - 1)) + freezer_temp_d) / average_temperature_period;
 	k_mutex_unlock(&average_freezer_temperature_mutex);
+}
 
+void check_for_over_temp(){
+	bool both_under_temp = true;
+	k_mutex_lock(&average_fridge_temperature_mutex, K_MSEC(100));
+	printk("fridge: avg: %f\n",  average_fridge_temperature);
+	if (average_fridge_temperature > fridge_target_temperature) {
+		printk("fridge temp too high (target: %f)\n", fridge_target_temperature);
+		fridge_time_over_temperature += average_temperature_period_seconds;
+		both_under_temp = false;
+	} 
+	k_mutex_unlock(&average_fridge_temperature_mutex);
+
+	k_mutex_lock(&average_freezer_temperature_mutex, K_MSEC(100));
+	printk("freezer: avg: %f\n", average_freezer_temperature);
+	if (average_freezer_temperature > freezer_target_temperature) {	
+		printk("freezer temp too high (target: %f)\n", freezer_target_temperature);
+		freezer_time_over_temperature += average_temperature_period_seconds;
+		both_under_temp = false;
+	} 
+	k_mutex_unlock(&average_freezer_temperature_mutex);
+
+	gpio_pin_set_dt(&over_temperature_led, !both_under_temp);
+
+	printk("fridge time over temp: %lld s, freezer time over temp: %lld s\n", fridge_time_over_temperature, freezer_time_over_temperature);
+}
+
+void temperature_read_handler(struct k_work *work) {
+	update_average_temperatures();
 
 	k_mutex_lock(&accounting_vars_mutex, K_MSEC(100));
 	read_count++;
 	if (read_count >= average_temperature_period){
 		read_count = 0;
 
-		bool both_undertemp = true;
-		k_mutex_lock(&average_fridge_temperature_mutex, K_MSEC(100));
-		printk("fridge: Current: %f, avg: %f\n", fridge_temp_d, average_fridge_temperature);
-		if (average_fridge_temperature > fridge_target_temperature) {
-			printk("frige temp too high (target: %f)\n", fridge_target_temperature);
-			fridge_time_over_temperature += average_temperature_period_seconds;
-			both_undertemp = false;
-		} 
-		k_mutex_unlock(&average_fridge_temperature_mutex);
-
-		k_mutex_lock(&average_freezer_temperature_mutex, K_MSEC(100));
-		printk("freezer: Current: %f, avg: %f\n", freezer_temp_d, average_freezer_temperature);
-		if (average_freezer_temperature > freezer_target_temperature) {	
-			printk("freezer temp too high (target: %f)\n", freezer_target_temperature);
-			freezer_time_over_temperature += average_temperature_period_seconds;
-			both_undertemp = false;
-		} 
-		k_mutex_unlock(&average_freezer_temperature_mutex);
-
-		gpio_pin_set_dt(&over_temperature_led, !both_undertemp);
-
-		printk("frige time overtemp: %lld s, freezer time overtemp: %lld s\n", fridge_time_over_temperature, freezer_time_over_temperature);
-
+		check_for_over_temp();
 	}
 	k_mutex_unlock(&accounting_vars_mutex);
 }
@@ -198,12 +204,16 @@ void timer_reset_handler(struct k_work *work) {
 	gpio_pin_set_dt(&over_temperature_led, false);
 }
 
-void main(void) {
-	printk("Hello World! %s\n", CONFIG_BOARD);
-
+void setup_hardware(){
 	getBme680s();
 	setupButton();
 	setupLed();
+}
+
+void main(void) {
+	printk("Hello World! %s\n", CONFIG_BOARD);
+
+	setup_hardware();
 	
 	k_timer_start(&temperature_read_timer, K_SECONDS(timer_timeout_seconds), K_SECONDS(timer_timeout_seconds));
 }
