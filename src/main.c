@@ -1,10 +1,5 @@
-/*
- * Copyright (c) 2012-2014 Wind River Systems, Inc.
- *
- * SPDX-License-Identifier: Apache-2.0
- */
-
 #include "zephyr/sys/printk.h"
+#include <stdbool.h>
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/sensor.h>
@@ -200,6 +195,7 @@ void timer_reset_handler(struct k_work *work) {
 	freezer_time_over_temp = 0;
 	read_count = 0;
 	k_mutex_unlock(&accounting_vars_mutex);
+	gpio_pin_set_dt(&overtemp_led, false);
 }
 
 void main(void) {
