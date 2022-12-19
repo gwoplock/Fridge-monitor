@@ -5,37 +5,38 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/gpio.h>
 
-void temperature_read_timer_handler(struct k_timer *dummy);
-void temperature_read_handler(struct k_work *work);
-void timer_reset_handler(struct k_work *work);
-void button_pressed_handler(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
+void temperatureReadTimerHandler(struct k_timer *dummy);
+void temperatureReadHandler(struct k_work *work);
+void timerResetHandler(struct k_work *work);
+void buttonPressedHandler(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
 
-static const struct device *fridge_temperature_sense_dev;
-static const struct device *freezer_temperature_sense_dev;
-static const struct gpio_dt_spec timer_reset_button = GPIO_DT_SPEC_GET(DT_NODELABEL(button0), gpios);
-static const struct gpio_dt_spec over_temperature_led = GPIO_DT_SPEC_GET(DT_NODELABEL(led0), gpios);
+static const struct device *FRIDGE_TEMPERATURE_SENSE_DEVICE;
+static const struct device *FREEZER_TEMPERATURE_SENSE_DEVICE;
+static const struct gpio_dt_spec TIMER_RESET_BUTTON = GPIO_DT_SPEC_GET(DT_NODELABEL(button0), gpios);
+static const struct gpio_dt_spec OVER_TEMPERATURE_LED = GPIO_DT_SPEC_GET(DT_NODELABEL(led0), gpios);
 
-static const double fridge_target_temperature = 4.0;
-static const double freezer_target_temperature = 0.0;
-static const uint16_t timer_timeout_seconds = 1;
-static const uint16_t average_temperature_period_seconds = 300;
-static const double average_temperature_period = average_temperature_period_seconds / timer_timeout_seconds;
+static const double FRIDGE_TARGET_TEMPERATURE = 4.0;
+static const double FREEZER_TARGET_TEMPERATURE = 0.0;
+static const uint16_t TIMER_TIMEOUT_SECONDS = 1;
+static const uint16_t AVERAGE_TEMPERATURE_PERIOD_SECONDS = 300;
+static const double AVERAGE_TEMPERATURE_PERIOD = AVERAGE_TEMPERATURE_PERIOD_SECONDS / TIMER_TIMEOUT_SECONDS;
 
-K_TIMER_DEFINE(temperature_read_timer, temperature_read_timer_handler, NULL);
-K_WORK_DEFINE(temperature_read_work_queue, temperature_read_handler);
-static struct gpio_callback button_cb_data;
-K_WORK_DEFINE(timer_reset_work_queue, timer_reset_handler);
+K_TIMER_DEFINE(TEMPERATURE_READ_TIMER, temperatureReadTimerHandler, NULL);
+K_WORK_DEFINE(TEMPERATURE_READ_WORK_QUEUE, temperatureReadHandler);
+K_WORK_DEFINE(TIMER_RESET_WORK_QUEUE, timerResetHandler);
 
-K_MUTEX_DEFINE(accounting_vars_mutex);
+static struct gpio_callback BUTTON_CALLBACK_DATA;
+
+K_MUTEX_DEFINE(ACCOUNTING_VARS_MUTEX);
 static uint16_t read_count = 0;
 static uint64_t fridge_time_over_temperature = 0;
 static uint64_t freezer_time_over_temperature = 0;
 
-K_MUTEX_DEFINE(average_fridge_temperature_mutex);
-static double average_fridge_temperature = fridge_target_temperature;
+K_MUTEX_DEFINE(AVERAGE_FRIDGE_TEMPERATURE_MUTEX);
+static double average_fridge_temperature = FRIDGE_TARGET_TEMPERATURE;
 
-K_MUTEX_DEFINE(average_freezer_temperature_mutex);
-static double average_freezer_temperature = freezer_target_temperature;
+K_MUTEX_DEFINE(AVERAGE_FREEZER_TEMPERATURE_MUTEX);
+static double average_freezer_temperature = FREEZER_TARGET_TEMPERATURE;
 
 bool verifyDevice(const struct device *dev) {
 		if (dev == NULL) {
@@ -59,7 +60,7 @@ bool verifyDevice(const struct device *dev) {
 void getFridgeBme680() {
 	static const struct device *tmp = DEVICE_DT_GET(DT_NODELABEL(fridge_temp));
 	if (verifyDevice(tmp)){
-		fridge_temperature_sense_dev = tmp;
+		FRIDGE_TEMPERATURE_SENSE_DEVICE = tmp;
 	} else {
 		k_panic();
 	}
@@ -68,7 +69,7 @@ void getFridgeBme680() {
 void getFreezerBme680() {
 	static const struct device *tmp = DEVICE_DT_GET(DT_NODELABEL(freezer_temp));
 	if (verifyDevice(tmp)){
-		freezer_temperature_sense_dev = tmp;
+		FREEZER_TEMPERATURE_SENSE_DEVICE = tmp;
 	} else {
 		k_panic();
 	}
@@ -82,129 +83,129 @@ void getBme680s(){
 
 void setupButton(){
 	int ret;
-	if (!device_is_ready(timer_reset_button.port)) {
+	if (!device_is_ready(TIMER_RESET_BUTTON.port)) {
 		printk("Error: button device %s is not ready\n",
-		       timer_reset_button.port->name);
+		       TIMER_RESET_BUTTON.port->name);
 		return;
 	}
 
-	ret = gpio_pin_configure_dt(&timer_reset_button, GPIO_INPUT);
+	ret = gpio_pin_configure_dt(&TIMER_RESET_BUTTON, GPIO_INPUT);
 	if (ret != 0) {
 		printk("Error %d: failed to configure %s pin %d\n",
-		       ret, timer_reset_button.port->name, timer_reset_button.pin);
+		       ret, TIMER_RESET_BUTTON.port->name, TIMER_RESET_BUTTON.pin);
 		return;
 	}
 
-	ret = gpio_pin_interrupt_configure_dt(&timer_reset_button,
+	ret = gpio_pin_interrupt_configure_dt(&TIMER_RESET_BUTTON,
 					      GPIO_INT_EDGE_TO_ACTIVE);
 	if (ret != 0) {
 		printk("Error %d: failed to configure interrupt on %s pin %d\n",
-			ret, timer_reset_button.port->name, timer_reset_button.pin);
+			ret, TIMER_RESET_BUTTON.port->name, TIMER_RESET_BUTTON.pin);
 		return;
 	}
 
-	gpio_init_callback(&button_cb_data, button_pressed_handler, BIT(timer_reset_button.pin));
-	gpio_add_callback(timer_reset_button.port, &button_cb_data);
-	printk("Set up button at %s pin %d\n", timer_reset_button.port->name, timer_reset_button.pin);
+	gpio_init_callback(&BUTTON_CALLBACK_DATA, buttonPressedHandler, BIT(TIMER_RESET_BUTTON.pin));
+	gpio_add_callback(TIMER_RESET_BUTTON.port, &BUTTON_CALLBACK_DATA);
+	printk("Set up button at %s pin %d\n", TIMER_RESET_BUTTON.port->name, TIMER_RESET_BUTTON.pin);
 }
 
 void setupLed(){
 	int ret;
-	if (over_temperature_led.port && !device_is_ready(over_temperature_led.port)) {
+	if (OVER_TEMPERATURE_LED.port && !device_is_ready(OVER_TEMPERATURE_LED.port)) {
 		printk("Error %d: LED device %s is not ready; ignoring it\n",
-		       ret, over_temperature_led.port->name);
+		       ret, OVER_TEMPERATURE_LED.port->name);
 	}
-	if (over_temperature_led.port) {
-		ret = gpio_pin_configure_dt(&over_temperature_led, GPIO_OUTPUT);
+	if (OVER_TEMPERATURE_LED.port) {
+		ret = gpio_pin_configure_dt(&OVER_TEMPERATURE_LED, GPIO_OUTPUT);
 		if (ret != 0) {
 			printk("Error %d: failed to configure LED device %s pin %d\n",
-			       ret, over_temperature_led.port->name, over_temperature_led.pin);
+			       ret, OVER_TEMPERATURE_LED.port->name, OVER_TEMPERATURE_LED.pin);
 		} else {
-			printk("Set up LED at %s pin %d\n", over_temperature_led.port->name, over_temperature_led.pin);
+			printk("Set up LED at %s pin %d\n", OVER_TEMPERATURE_LED.port->name, OVER_TEMPERATURE_LED.pin);
 		}
 	}
 
 }
 
-void temperature_read_timer_handler(struct k_timer *dummy){
-    k_work_submit(&temperature_read_work_queue);
+void temperatureReadTimerHandler(struct k_timer *dummy){
+    k_work_submit(&TEMPERATURE_READ_WORK_QUEUE);
 }
 
-void update_average_temperatures() {
+void updateAverageTemperatures() {
 	struct sensor_value fridge_temp; 
 	struct sensor_value freezer_temp;
 
-	sensor_sample_fetch(fridge_temperature_sense_dev);
-	sensor_sample_fetch(freezer_temperature_sense_dev);
-	sensor_channel_get(fridge_temperature_sense_dev, SENSOR_CHAN_AMBIENT_TEMP, &fridge_temp);
-	sensor_channel_get(freezer_temperature_sense_dev, SENSOR_CHAN_AMBIENT_TEMP, &freezer_temp);
+	sensor_sample_fetch(FRIDGE_TEMPERATURE_SENSE_DEVICE);
+	sensor_sample_fetch(FREEZER_TEMPERATURE_SENSE_DEVICE);
+	sensor_channel_get(FRIDGE_TEMPERATURE_SENSE_DEVICE, SENSOR_CHAN_AMBIENT_TEMP, &fridge_temp);
+	sensor_channel_get(FREEZER_TEMPERATURE_SENSE_DEVICE, SENSOR_CHAN_AMBIENT_TEMP, &freezer_temp);
 	
 	double fridge_temp_d = sensor_value_to_double(&fridge_temp);
 	double freezer_temp_d = sensor_value_to_double(&freezer_temp);
 
-	k_mutex_lock(&average_fridge_temperature_mutex, K_MSEC(100));
-	average_fridge_temperature = ((average_fridge_temperature * (average_temperature_period - 1)) + fridge_temp_d) / average_temperature_period;
-	k_mutex_unlock(&average_fridge_temperature_mutex);
+	k_mutex_lock(&AVERAGE_FRIDGE_TEMPERATURE_MUTEX, K_MSEC(100));
+	average_fridge_temperature = ((average_fridge_temperature * (AVERAGE_TEMPERATURE_PERIOD - 1)) + fridge_temp_d) / AVERAGE_TEMPERATURE_PERIOD;
+	k_mutex_unlock(&AVERAGE_FRIDGE_TEMPERATURE_MUTEX);
 
-	k_mutex_lock(&average_freezer_temperature_mutex, K_MSEC(100));
-	average_freezer_temperature = ((average_freezer_temperature * (average_temperature_period - 1)) + freezer_temp_d) / average_temperature_period;
-	k_mutex_unlock(&average_freezer_temperature_mutex);
+	k_mutex_lock(&AVERAGE_FREEZER_TEMPERATURE_MUTEX, K_MSEC(100));
+	average_freezer_temperature = ((average_freezer_temperature * (AVERAGE_TEMPERATURE_PERIOD - 1)) + freezer_temp_d) / AVERAGE_TEMPERATURE_PERIOD;
+	k_mutex_unlock(&AVERAGE_FREEZER_TEMPERATURE_MUTEX);
 }
 
-void check_for_over_temp(){
+void checkForOverTemperature(){
 	bool both_under_temp = true;
-	k_mutex_lock(&average_fridge_temperature_mutex, K_MSEC(100));
+	k_mutex_lock(&AVERAGE_FRIDGE_TEMPERATURE_MUTEX, K_MSEC(100));
 	printk("fridge: avg: %f\n",  average_fridge_temperature);
-	if (average_fridge_temperature > fridge_target_temperature) {
-		printk("fridge temp too high (target: %f)\n", fridge_target_temperature);
-		fridge_time_over_temperature += average_temperature_period_seconds;
+	if (average_fridge_temperature > FRIDGE_TARGET_TEMPERATURE) {
+		printk("fridge temp too high (target: %f)\n", FRIDGE_TARGET_TEMPERATURE);
+		fridge_time_over_temperature += AVERAGE_TEMPERATURE_PERIOD_SECONDS;
 		both_under_temp = false;
 	} 
-	k_mutex_unlock(&average_fridge_temperature_mutex);
+	k_mutex_unlock(&AVERAGE_FRIDGE_TEMPERATURE_MUTEX);
 
-	k_mutex_lock(&average_freezer_temperature_mutex, K_MSEC(100));
+	k_mutex_lock(&AVERAGE_FREEZER_TEMPERATURE_MUTEX, K_MSEC(100));
 	printk("freezer: avg: %f\n", average_freezer_temperature);
-	if (average_freezer_temperature > freezer_target_temperature) {	
-		printk("freezer temp too high (target: %f)\n", freezer_target_temperature);
-		freezer_time_over_temperature += average_temperature_period_seconds;
+	if (average_freezer_temperature > FREEZER_TARGET_TEMPERATURE) {	
+		printk("freezer temp too high (target: %f)\n", FREEZER_TARGET_TEMPERATURE);
+		freezer_time_over_temperature += AVERAGE_TEMPERATURE_PERIOD_SECONDS;
 		both_under_temp = false;
 	} 
-	k_mutex_unlock(&average_freezer_temperature_mutex);
+	k_mutex_unlock(&AVERAGE_FREEZER_TEMPERATURE_MUTEX);
 
-	gpio_pin_set_dt(&over_temperature_led, !both_under_temp);
+	gpio_pin_set_dt(&OVER_TEMPERATURE_LED, !both_under_temp);
 
 	printk("fridge time over temp: %lld s, freezer time over temp: %lld s\n", fridge_time_over_temperature, freezer_time_over_temperature);
 }
 
-void temperature_read_handler(struct k_work *work) {
-	update_average_temperatures();
+void temperatureReadHandler(struct k_work *work) {
+	updateAverageTemperatures();
 
-	k_mutex_lock(&accounting_vars_mutex, K_MSEC(100));
+	k_mutex_lock(&ACCOUNTING_VARS_MUTEX, K_MSEC(100));
 	read_count++;
-	if (read_count >= average_temperature_period){
+	if (read_count >= AVERAGE_TEMPERATURE_PERIOD){
 		read_count = 0;
 
-		check_for_over_temp();
+		checkForOverTemperature();
 	}
-	k_mutex_unlock(&accounting_vars_mutex);
+	k_mutex_unlock(&ACCOUNTING_VARS_MUTEX);
 }
 
-void button_pressed_handler(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
+void buttonPressedHandler(const struct device *dev, struct gpio_callback *cb, uint32_t pins) {
 	printk("Button pressed at %" PRIu32 "\n", k_cycle_get_32());
-	k_work_submit(&timer_reset_work_queue);
+	k_work_submit(&TIMER_RESET_WORK_QUEUE);
 }
 
 
-void timer_reset_handler(struct k_work *work) {
-	k_mutex_lock(&accounting_vars_mutex, K_MSEC(100));
+void timerResetHandler(struct k_work *work) {
+	k_mutex_lock(&ACCOUNTING_VARS_MUTEX, K_MSEC(100));
 	fridge_time_over_temperature = 0;
 	freezer_time_over_temperature = 0;
 	read_count = 0;
-	k_mutex_unlock(&accounting_vars_mutex);
-	gpio_pin_set_dt(&over_temperature_led, false);
+	k_mutex_unlock(&ACCOUNTING_VARS_MUTEX);
+	gpio_pin_set_dt(&OVER_TEMPERATURE_LED, false);
 }
 
-void setup_hardware(){
+void setupHardware(){
 	getBme680s();
 	setupButton();
 	setupLed();
@@ -213,7 +214,7 @@ void setup_hardware(){
 void main(void) {
 	printk("Hello World! %s\n", CONFIG_BOARD);
 
-	setup_hardware();
+	setupHardware();
 	
-	k_timer_start(&temperature_read_timer, K_SECONDS(timer_timeout_seconds), K_SECONDS(timer_timeout_seconds));
+	k_timer_start(&TEMPERATURE_READ_TIMER, K_SECONDS(TIMER_TIMEOUT_SECONDS), K_SECONDS(TIMER_TIMEOUT_SECONDS));
 }
