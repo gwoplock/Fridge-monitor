@@ -1,5 +1,3 @@
-
-
 #include "callbacks.h"
 #include "hardware.h"
 #include "consts.h"

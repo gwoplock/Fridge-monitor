@@ -10,6 +10,9 @@
 
 static struct gpio_callback BUTTON_CALLBACK_DATA;
 
+const struct device *FRIDGE_TEMPERATURE_SENSE_DEVICE;
+const struct device *FREEZER_TEMPERATURE_SENSE_DEVICE;
+
 bool verifyDevice(const struct device *dev) {
 		if (dev == NULL) {
 		/* No such node, or the node does not have status "okay". */

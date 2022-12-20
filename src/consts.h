@@ -4,8 +4,6 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/gpio.h>
 
-static const struct device *FRIDGE_TEMPERATURE_SENSE_DEVICE;
-static const struct device *FREEZER_TEMPERATURE_SENSE_DEVICE;
 static const struct gpio_dt_spec TIMER_RESET_BUTTON = GPIO_DT_SPEC_GET(DT_NODELABEL(button0), gpios);
 static const struct gpio_dt_spec OVER_TEMPERATURE_LED = GPIO_DT_SPEC_GET(DT_NODELABEL(led0), gpios);
 

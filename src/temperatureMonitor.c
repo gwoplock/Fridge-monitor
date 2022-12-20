@@ -1,4 +1,5 @@
 #include "temperatureMonitor.h"
+#include "hardware.h"
 #include "consts.h"
 
 #include <zephyr/kernel.h>
